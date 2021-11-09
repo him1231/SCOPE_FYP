@@ -1,114 +1,143 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * Generated with the TypeScript template
- * https://github.com/react-native-community/react-native-template-typescript
- *
- * @format
- */
-
-import React from 'react';
+import React, {useState} from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
+  ActivityIndicator,
   StyleSheet,
   Text,
-  useColorScheme,
+  TouchableOpacity,
   View,
 } from 'react-native';
+import MapView from 'react-native-maps';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+const App = () => {
+  const [initialing, setInitialing] = useState(false);
 
-const Section: React.FC<{
-  title: string;
-}> = ({children, title}) => {
-  const isDarkMode = useColorScheme() === 'dark';
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
+    <View style={styles.container}>
+      {initialing && <LoadingIndicator />}
+      {!initialing && <MapPage />}
     </View>
   );
 };
 
-const App = () => {
-  const isDarkMode = useColorScheme() === 'dark';
+const LoadingIndicator = React.memo(() => {
+  return <ActivityIndicator style={{flex: 1}} />;
+});
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
+const MapPage = () => {
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    <>
+      <Map />
+      <View style={styles.inputContainer}>
+        <LocationInput title={'start:'} />
+        <Separator />
+        <LocationInput title={'end:'} />
+        <Separator />
+        <RouteButton />
+      </View>
+    </>
   );
 };
 
+const Map = React.memo(() => {
+  return (
+    <MapView
+      style={styles.map}
+      initialRegion={{
+        latitude: 22.3193,
+        longitude: 114.1694,
+        latitudeDelta: 0.0461,
+        longitudeDelta: 0.021,
+      }}
+      onPress={e => {
+        console.log('onPress: ', e.nativeEvent.coordinate);
+      }}
+    />
+  );
+});
+
+const LocationInput = React.memo(
+  (props: {title?: string; content?: string}) => {
+    const {title, content} = props;
+    return (
+      <View style={[styles.input, styles.shadow]}>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.content}>{content}</Text>
+      </View>
+    );
+  },
+);
+
+const RouteButton = React.memo((props: {onPress?: () => void}) => {
+  const {onPress} = props;
+  return (
+    <TouchableOpacity style={styles.button} onPress={onPress}>
+      <Text style={styles.buttonText}>GO</Text>
+    </TouchableOpacity>
+  );
+});
+
+const Separator = React.memo(() => {
+  return <View style={styles.separator} />;
+});
+
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    ...StyleSheet.absoluteFillObject,
+    flex: 1, //the container will fill the whole screen.
+    justifyContent: 'flex-end',
+    alignItems: 'center',
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  map: {
+    ...StyleSheet.absoluteFillObject,
   },
-  sectionDescription: {
-    marginTop: 8,
+  inputContainer: {
+    position: 'absolute',
+    top: '8%',
+    width: '100%',
+    padding: 20,
+    alignItems: 'flex-end',
+  },
+  input: {
+    backgroundColor: 'white',
+    width: '100%',
+    height: 40,
+    borderRadius: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  title: {marginEnd: 10},
+  content: {
+    flex: 1,
+  },
+  shadow: {
+    shadowColor: '#939393',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.23,
+    shadowRadius: 5,
+
+    elevation: 3,
+  },
+  separator: {
+    width: 20,
+    height: 20,
+  },
+  button: {
+    width: 50,
+    height: 50,
+    borderRadius: 50,
+    backgroundColor: 'red',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  buttonText: {
     fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
+    fontWeight: '800',
+    color: 'white',
   },
 });
 
