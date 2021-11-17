@@ -10,6 +10,8 @@
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
   },
   "dependencies": {
+    "geolib": "^3.3.3",
+    "node-dijkstra": "^2.5.0",
     "react": "17.0.2",
     "react-native": "0.66.2",
     "react-native-maps": "^0.29.3",

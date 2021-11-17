@@ -1,65 +1,80 @@
 import React, {useEffect, useState} from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import {ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import MapView, {Callout, LatLng, Marker} from 'react-native-maps';
-import Realm from 'realm';
+import Realm, {UpdateMode} from 'realm';
+import {getDistance} from 'geolib';
 
-const RouteFareSchema = {
-  name: 'RouteFare',
-  primaryKey: 'uid',
+const RouteSchema = {
+  name: 'Route',
+  primaryKey: 'id',
   properties: {
-    uid: 'string',
-    routeId: 'int',
-    companyCode: 'string',
-    district: 'string',
-    routeNameC: 'string',
-    routeNameS: 'string',
-    routeNameE: 'string',
-    routeType: 'int',
-    serviceMode: 'string',
-    specialType: 'int',
-    journeyTime: 'int',
-    locStartNameC: 'string',
-    locStartNameS: 'string',
-    locStartNameE: 'string',
-    locEndNameC: 'string',
-    locEndNameS: 'string',
-    locEndNameE: 'string',
-    hyperlinkC: 'string',
-    hyperlinkS: 'string',
-    hyperlinkE: 'string',
-    fullFare: 'double',
-    lastUpdateDate: 'string',
-    routeSeq: 'int',
-    stopSeq: 'int',
-    stopId: 'int',
-    stopPickDrop: 'int',
-    stopNameC: 'string',
-    stopNameS: 'string',
-    stopNameE: 'string',
-
-    coordinatesLat: 'int',
-    coordinatesLon: 'int',
+    id: 'string',
+    route: 'string',
+    bound: 'string',
+    service_type: 'string',
+    orig_en: 'string',
+    orig_tc: 'string',
+    orig_sc: 'string',
+    dest_en: 'string',
+    dest_tc: 'string',
+    dest_sc: 'string',
+    route_stop: 'RouteStop[]',
   },
 };
 
-const initRealm = () => {
-  return new Realm({path: 'RouteFare', schema: [RouteFareSchema]});
+const RouteStopSchema = {
+  name: 'RouteStop',
+  primaryKey: 'id',
+  properties: {
+    id: 'string',
+    route: 'string',
+    routeObj: {
+      type: 'linkingObjects',
+      objectType: 'Route',
+      property: 'route_stop',
+    },
+    bound: 'string',
+    service_type: 'string',
+    seq: 'string',
+    stop: 'string',
+    stopObj: {
+      type: 'linkingObjects',
+      objectType: 'Stop',
+      property: 'route_stop',
+    },
+  },
 };
 
-const getBusData = async () => {
+const StopSchema = {
+  name: 'Stop',
+  primaryKey: 'stop',
+  properties: {
+    stop: 'string',
+    name_en: 'string',
+    name_tc: 'string',
+    name_sc: 'string',
+    lat: 'double',
+    long: 'double',
+    route_stop: 'RouteStop[]',
+    nearby_stop: 'Stop[]',
+  },
+};
+
+const walkDistance = 0.003;
+
+const initRealm = () => {
+  return new Realm({
+    path: 'Routing_ver_0.11',
+    schema: [RouteSchema, RouteStopSchema, StopSchema],
+    schemaVersion: 0,
+  });
+};
+
+const getJsonData = async (url: string) => {
   try {
-    const response = await fetch(
-      'https://static.data.gov.hk/td/routes-fares-geojson/JSON_BUS.json',
-    );
+    const response = await fetch(url);
     const json = await response.json();
-    return json.features;
+    return json;
   } catch (error) {
     console.error(error);
   }
@@ -68,12 +83,6 @@ const getBusData = async () => {
 const App = () => {
   const [initialing, setInitialing] = useState(true);
   const [realm, setRealm] = useState<Realm | undefined>(undefined);
-  const [startCoordinate, setStartCoordinate] = useState<LatLng | undefined>(
-    undefined,
-  );
-  const [endCoordinate, setEndCoordinate] = useState<LatLng | undefined>(
-    undefined,
-  );
 
   useEffect(() => {
     init();
@@ -82,110 +91,369 @@ const App = () => {
   const init = async () => {
     const realm = initRealm();
     setRealm(realm);
-    let routeFare = realm?.objects('RouteFare');
-    if (routeFare.length === 0) {
+
+    let stopList = realm?.objects<Stop>('Stop');
+    let routeList = realm?.objects<Route>('Route');
+    let routeStopList = realm?.objects<RouteStop>('RouteStop');
+
+    // if (routeList.length !== 0) {
+    //   console.log('routeList');
+    //   console.log(routeList.length);
+    //   console.log(routeList[0]);
+    // }
+    // if (routeStopList.length !== 0) {
+    //   console.log('routeStopList');
+    //   console.log(routeStopList.length);
+    //   console.log(routeStopList[0]);
+    // }
+    // if (stopList.length !== 0) {
+    //   console.log('stopList');
+    //   console.log(stopList.length);
+    //   console.log(stopList[0]);
+    // }
+
+    if (stopList.length === 0 || routeStopList.length === 0 || routeList.length === 0) {
+      console.log('creatObject');
       await creatObject(realm);
+    } else {
+      // testRouting(realm);
+      // testRoutingTwo(realm);
+      testRoutingMulti(realm);
     }
 
-    setInitialing(false);
+    // setInitialing(false);
+  };
 
-    console.log('routeFare', routeFare);
+  const testRouting = (realm: Realm) => {
+    console.log('start routing @ ', new Date());
+    const startLocation: LatLng = {
+      latitude: 22.3670368,
+      longitude: 114.1796286,
+    };
+    const endLocation: LatLng = {
+      latitude: 22.391128,
+      longitude: 114.2081145,
+    };
+
+    // const query =
+    // `SUBQUERY(route_stop, $rs,
+    // `route_stop.stopObj.lat > ${startLocation.latitude - walkDistance}
+    // route_stop.stopObj.lat < ${startLocation.latitude + walkDistance} &&
+    // route_stop.stopObj.long > ${startLocation.longitude - walkDistance} &&
+    // route_stop.stopObj.long < ${startLocation.longitude + walkDistance}`;
+    // ).@count > 0`;
+
+    // console.log('query', query);
+
+    const query = `SUBQUERY(route_stop, $rs, 
+      $rs.stopObj.lat > ${startLocation.latitude - walkDistance} &&
+      $rs.stopObj.lat < ${startLocation.latitude + walkDistance} &&
+      $rs.stopObj.long > ${startLocation.longitude - walkDistance} &&
+      $rs.stopObj.long < ${startLocation.longitude + walkDistance}
+    ).@count > 0 &&
+    SUBQUERY(route_stop, $rs, 
+      $rs.stopObj.lat > ${endLocation.latitude - walkDistance} &&
+      $rs.stopObj.lat < ${endLocation.latitude + walkDistance} &&
+      $rs.stopObj.long > ${endLocation.longitude - walkDistance} &&
+      $rs.stopObj.long < ${endLocation.longitude + walkDistance}
+    ).@count > 0`;
+
+    const routeList = realm.objects<Route>('Route').filtered(query);
+
+    console.log('routeList.length', routeList.length);
+    console.log('routeList.example', routeList);
+
+    routeList.forEach(route => {
+      if (route.route_stop) {
+        const startRouteQuery = `
+        stopObj.lat > ${startLocation.latitude - walkDistance} &&
+        stopObj.lat < ${startLocation.latitude + walkDistance} &&
+        stopObj.long > ${startLocation.longitude - walkDistance} &&
+        stopObj.long < ${startLocation.longitude + walkDistance}`;
+        const startRouteStops = route.route_stop.filtered(startRouteQuery);
+        // console.log('startRouteStops.length', startRouteStops.length);
+
+        const endRouteQuery = `
+        stopObj.lat > ${endLocation.latitude - walkDistance} &&
+        stopObj.lat < ${endLocation.latitude + walkDistance} &&
+        stopObj.long > ${endLocation.longitude - walkDistance} &&
+        stopObj.long < ${endLocation.longitude + walkDistance}`;
+        const endRouteStops = route.route_stop.filtered(endRouteQuery);
+        // console.log('endRouteStops.length', endRouteStops.length);
+
+        startRouteStops.forEach(startRouteStop => {
+          endRouteStops.forEach(endRouteStop => {
+            if (startRouteStop.seq < endRouteStop.seq)
+              console.log(
+                `start: ${startRouteStop.stopObj?.[0].name_tc} => ${route.route} => ${endRouteStop.stopObj?.[0].name_tc}`,
+              );
+          });
+        });
+      }
+    });
+
+    console.log('end routing @ ', new Date());
+  };
+
+  const testRoutingTwo = (realm: Realm) => {
+    console.log('start routing two @ ', new Date());
+    const startLocation: LatLng = {
+      latitude: 22.3670368,
+      longitude: 114.1796286,
+    };
+    const endLocation: LatLng = {
+      latitude: 22.391128,
+      longitude: 114.2081145,
+    };
+
+    const startStopQuery = `
+    lat > ${startLocation.latitude - walkDistance} &&
+    lat < ${startLocation.latitude + walkDistance} &&
+    long > ${startLocation.longitude - walkDistance} &&
+    long < ${startLocation.longitude + walkDistance} &&
+    route_stop.routeObj.route_stop.stopObj.lat > ${endLocation.latitude - walkDistance} &&
+    route_stop.routeObj.route_stop.stopObj.lat < ${endLocation.latitude + walkDistance} &&
+    route_stop.routeObj.route_stop.stopObj.long > ${endLocation.longitude - walkDistance} &&
+    route_stop.routeObj.route_stop.stopObj.long < ${endLocation.longitude + walkDistance}`;
+
+    const startRouteStopQuery = `
+    routeObj.route_stop.stopObj.lat > ${endLocation.latitude - walkDistance} &&
+    routeObj.route_stop.stopObj.lat < ${endLocation.latitude + walkDistance} &&
+    routeObj.route_stop.stopObj.long > ${endLocation.longitude - walkDistance} &&
+    routeObj.route_stop.stopObj.long < ${endLocation.longitude + walkDistance}`;
+
+    const endRouteStopQuery = `
+    stopObj.lat > ${endLocation.latitude - walkDistance} &&
+    stopObj.lat < ${endLocation.latitude + walkDistance} &&
+    stopObj.long > ${endLocation.longitude - walkDistance} &&
+    stopObj.long < ${endLocation.longitude + walkDistance}`;
+
+    const startStopList = realm.objects<Stop>('Stop').filtered(startStopQuery);
+
+    startStopList.forEach(startStop => {
+      const startRouteStopList = startStop.route_stop?.filtered(startRouteStopQuery);
+      startRouteStopList?.forEach(startRouteStop => {
+        const route = startRouteStop.routeObj?.[0];
+        const endRouteStopList = route?.route_stop?.filtered(endRouteStopQuery);
+        endRouteStopList?.forEach(endRouteStop => {
+          const endStop = endRouteStop.stopObj?.[0];
+          console.log(`start: ${startStop.name_tc} => ${route?.route} => ${endStop?.name_tc}`);
+        });
+      });
+    });
+
+    console.log('end routing two @ ', new Date());
+  };
+
+  const testRoutingMulti = (realm: Realm) => {
+    console.log('start routing Multi @ ', new Date());
+    const startLocation: LatLng = {
+      latitude: 22.3670368,
+      longitude: 114.1796286,
+    };
+    const endLocation: LatLng = {
+      latitude: 22.391128,
+      longitude: 114.2081145,
+    };
+
+    const wayPath = [
+      'route_stop',
+      'routeObj',
+      'route_stop',
+      'stopObj',
+      'nearby_stop',
+      'route_stop',
+      'routeObj',
+      'route_stop.stopObj',
+    ];
+
+    const startStopQuery = `
+    lat > ${startLocation.latitude - walkDistance} &&
+    lat < ${startLocation.latitude + walkDistance} &&
+    long > ${startLocation.longitude - walkDistance} &&
+    long < ${startLocation.longitude + walkDistance} &&
+    ${wayPath.join('.')}.lat > ${endLocation.latitude - walkDistance} &&
+    ${wayPath.join('.')}.lat < ${endLocation.latitude + walkDistance} &&
+    ${wayPath.join('.')}.long > ${endLocation.longitude - walkDistance} &&
+    ${wayPath.join('.')}.long < ${endLocation.longitude + walkDistance}`;
+
+    console.log('start query startStopList @ ', new Date());
+    const startStopList = realm.objects<Stop>('Stop').filtered(startStopQuery);
+    console.log('end query startStopList @ ', new Date());
+
+    console.log('startStopList.example', startStopList[0].name_tc);
+
+    console.log('end routing Multi @ ', new Date());
+  };
+
+  type Route = {
+    id?: string;
+    route: string;
+    bound: string;
+    service_type: string;
+    orig_en: string;
+    orig_tc: string;
+    orig_sc: string;
+    dest_en: string;
+    dest_tc: string;
+    dest_sc: string;
+    route_stop?: Realm.Results<RouteStop & Realm.Object>;
+  };
+
+  type RouteStop = {
+    id?: string;
+    route: string;
+    bound: string;
+    service_type: string;
+    seq: string;
+    stop: string;
+    routeObj?: Realm.Results<Route & Realm.Object>;
+    stopObj?: Realm.Results<Stop & Realm.Object>;
+  };
+
+  type Stop = {
+    stop: string;
+    name_en: string;
+    name_tc: string;
+    name_sc: string;
+    lat: number;
+    long: number;
+    nearby_stop?: Realm.Results<Stop & Realm.Object>;
+    route_stop?: Realm.Results<RouteStop & Realm.Object>;
   };
 
   const creatObject = async (realm: Realm) => {
-    console.log('get Data');
-    const data = (await getBusData()) as any[];
-    console.log('complete get Data');
+    console.log('get Data @ ', new Date());
 
-    const objArr: Realm.Object[] = [];
-    const dataLength = data.length;
+    const busRouteJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/route/')) as any;
 
-    console.log('write Data');
+    const busRouteData = (busRouteJsonData.data as Route[]).map(data => {
+      return {...data, id: data.route + data.bound + data.service_type};
+    }) as Route[];
+
+    console.log('got BusRouteData', ' @ ', new Date(), busRouteData[0]);
+
+    const busRouteStopJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/route-stop')) as any;
+
+    const busRouteStopData = (busRouteStopJsonData.data as RouteStop[]).map(data => {
+      return {
+        ...data,
+        id: data.route + data.bound + data.service_type + data.seq,
+      };
+    }) as RouteStop[];
+
+    console.log('got BusRouteStopData', ' @ ', new Date(), busRouteStopData[0]);
+
+    const busStopJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/stop')) as any;
+
+    const busStopData = busStopJsonData.data.map((busStop: any) => {
+      return {...busStop, lat: Number(busStop.lat), long: Number(busStop.long)};
+    }) as Stop[];
+
+    console.log('got BusStopData', ' @ ', new Date(), busStopData[0]);
+
+    console.log('start write Data', ' @ ', new Date());
+
     realm.write(() => {
-      data.forEach((bus: any, index: number) => {
-        console.log('creating: ', index, '/', dataLength);
+      busRouteStopData.forEach((busRouteStop, index) => {
+        if (index % 5000 === 0) {
+          console.log(`${index} out of ${busRouteStopData.length} complete @ ${new Date()}`);
+        }
 
-        const task = realm.create(
-          'RouteFare',
-          {
-            uid:
-              '' +
-              bus.properties.routeId +
-              bus.properties.routeSeq +
-              bus.properties.stopSeq +
-              bus.properties.stopPickDrop,
-            ...bus.properties,
-            coordinatesLat: bus.geometry.coordinates[0],
-            coordinatesLon: bus.geometry.coordinates[1],
-          },
-          'modified',
-        );
-        objArr.push(task);
+        const routeStop = {
+          ...busRouteStop,
+        };
+
+        realm.create<RouteStop>('RouteStop', routeStop, Realm.UpdateMode.Modified);
+      });
+
+      let routeStopList = realm?.objects<RouteStop>('RouteStop');
+      console.log('routeStopList');
+      console.log('routeStopList.length', routeStopList.length);
+      console.log('routeStopList[0]', routeStopList[0]);
+      // return;
+
+      busRouteData.forEach((busRoute, index) => {
+        if (index % 100 === 0) {
+          console.log(`${index} out of ${busRouteData.length} complete @ ${new Date()}`);
+        }
+
+        const route = {
+          ...busRoute,
+          route_stop: routeStopList.filtered(
+            `route == "${busRoute.route}" && bound == "${busRoute.bound}" && service_type == "${busRoute.service_type}"`,
+          ),
+        };
+
+        realm.create<Route>('Route', route, Realm.UpdateMode.Modified);
+      });
+
+      busStopData.forEach((busStop, index) => {
+        if (index % 1000 === 0) {
+          console.log(`${index} out of ${busStopData.length} complete @ ${new Date()}`);
+        }
+        const stop: Stop = {
+          ...busStop,
+          // nearby_stop: busStopData.filter(
+          //   compareStop =>
+          //     getDistance(
+          //       {lat: compareStop.lat, lon: compareStop.long},
+          //       {lat: busStop.lat, lon: busStop.long},
+          //     ) < 300,
+          // ),
+          route_stop: routeStopList.filtered(`stop == "${busStop.stop}"`),
+        };
+        realm.create<Stop>('Stop', stop, Realm.UpdateMode.Modified);
+      });
+
+      let stopList = realm?.objects<Stop>('Stop');
+
+      stopList.forEach((stop, index) => {
+        if (index % 1000 === 0) {
+          console.log(`${index} out of ${stopList.length} complete @ ${new Date()}`);
+        }
+        const nearby_stop_query = `
+        lat > ${stop.lat - walkDistance} &&
+        lat < ${stop.lat + walkDistance} &&
+        long > ${stop.long - walkDistance} &&
+        long < ${stop.long + walkDistance}`;
+        stop.nearby_stop = stopList.filtered(nearby_stop_query);
       });
     });
+
     console.log('complete write Data');
-  };
-
-  const onSelectStart = (coordinate: LatLng) => {
-    setStartCoordinate(coordinate);
-  };
-
-  const onSelectEnd = (coordinate: LatLng) => {
-    setEndCoordinate(coordinate);
-  };
-
-  const onPressRoute = () => {
-    if (realm && startCoordinate) {
-      const routeFares = realm
-        .objects('RouteFare')
-        .filtered(
-          `coordinatesLat > ${
-            startCoordinate.latitude + 0.002
-          } AND coordinatesLat < ${startCoordinate.latitude - 0.002}`,
-        );
-      console.log(routeFares);
-    }
   };
 
   return (
     <View style={styles.container}>
       {initialing && <LoadingIndicator />}
-      {!initialing && (
-        <MapPage
-          onSelectStart={onSelectStart}
-          onSelectEnd={onSelectEnd}
-          onPressRoute={onPressRoute}
-        />
-      )}
+      {!initialing && <MapPage realm={realm} />}
     </View>
   );
 };
 
 const LoadingIndicator = React.memo(() => {
-  return (
-    <ActivityIndicator
-      color={'white'}
-      style={{flex: 1, width: '100%', backgroundColor: '#0009'}}
-    />
-  );
+  return <ActivityIndicator color={'white'} style={{flex: 1, width: '100%', backgroundColor: '#0009'}} />;
 });
 
-const MapPage = ({
-  onSelectStart,
-  onSelectEnd,
-  onPressRoute,
-}: {
-  onSelectStart?: (_: LatLng) => void;
-  onSelectEnd?: (_: LatLng) => void;
-  onPressRoute?: () => void;
-}) => {
+const MapPage = ({realm}: {realm?: Realm}) => {
+  const [startCoordinate, setStartCoordinate] = useState<LatLng | undefined>(undefined);
+  const [endCoordinate, setEndCoordinate] = useState<LatLng | undefined>(undefined);
+
+  const onPressRoute = () => {
+    if (realm && startCoordinate && endCoordinate) {
+      console.log('startCoordinate', startCoordinate);
+      console.log('endCoordinate', endCoordinate);
+    }
+  };
+
   return (
     <>
-      <Map onSelectStart={onSelectStart} onSelectEnd={onSelectEnd} />
+      <Map onSelectStart={setStartCoordinate} onSelectEnd={setEndCoordinate} />
       <View style={styles.inputContainer}>
-        <LocationInput title={'start:'} />
+        <LocationInput title={'start:'} content={`${startCoordinate?.latitude},${startCoordinate?.longitude}`} />
         <Separator />
-        <LocationInput title={'end:'} />
+        <LocationInput title={'end:'} content={`${endCoordinate?.latitude},${endCoordinate?.longitude}`} />
         <Separator />
         <RouteButton onPress={onPressRoute} />
       </View>
@@ -194,16 +462,8 @@ const MapPage = ({
 };
 
 const Map = React.memo(
-  ({
-    onSelectStart,
-    onSelectEnd,
-  }: {
-    onSelectStart?: (_: LatLng) => void;
-    onSelectEnd?: (_: LatLng) => void;
-  }) => {
-    const [currentSelection, setCurrentSelection] = useState<
-      LatLng | undefined
-    >(undefined);
+  ({onSelectStart, onSelectEnd}: {onSelectStart?: (_: LatLng) => void; onSelectEnd?: (_: LatLng) => void}) => {
+    const [currentSelection, setCurrentSelection] = useState<LatLng | undefined>(undefined);
     return (
       <MapView
         style={styles.map}
@@ -262,17 +522,15 @@ const Map = React.memo(
   },
 );
 
-const LocationInput = React.memo(
-  (props: {title?: string; content?: string}) => {
-    const {title, content} = props;
-    return (
-      <View style={[styles.input, styles.shadow]}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.content}>{content}</Text>
-      </View>
-    );
-  },
-);
+const LocationInput = React.memo((props: {title?: string; content?: string}) => {
+  const {title, content} = props;
+  return (
+    <View style={[styles.input, styles.shadow]}>
+      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.content}>{content}</Text>
+    </View>
+  );
+});
 
 const RouteButton = React.memo((props: {onPress?: () => void}) => {
   const {onPress} = props;
