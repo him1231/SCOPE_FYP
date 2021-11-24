@@ -3,6 +3,7 @@ import {ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View} from
 import MapView, {Callout, LatLng, Marker} from 'react-native-maps';
 import Realm, {UpdateMode} from 'realm';
 import {getDistance} from 'geolib';
+import Graph from 'node-dijkstra';
 
 const RouteSchema = {
   name: 'Route',
@@ -61,10 +62,11 @@ const StopSchema = {
 };
 
 const walkDistance = 0.003;
+const walkSpeedKMpH = 4;
 
 const initRealm = () => {
   return new Realm({
-    path: 'Routing_ver_0.11',
+    path: 'Routing_ver_0.14',
     schema: [RouteSchema, RouteStopSchema, StopSchema],
     schemaVersion: 0,
   });
@@ -113,19 +115,19 @@ const App = () => {
     // }
 
     if (stopList.length === 0 || routeStopList.length === 0 || routeList.length === 0) {
-      console.log('creatObject');
-      await creatObject(realm);
+      // console.log('creatObject');
+      // await creatObject(realm);
     } else {
       // testRouting(realm);
       // testRoutingTwo(realm);
-      testRoutingMulti(realm);
+      // testRoutingMulti(realm);
+      makeGraph();
     }
 
     // setInitialing(false);
   };
 
-  const testRouting = (realm: Realm) => {
-    console.log('start routing @ ', new Date());
+  const makeGraph = async () => {
     const startLocation: LatLng = {
       latitude: 22.3670368,
       longitude: 114.1796286,
@@ -135,155 +137,77 @@ const App = () => {
       longitude: 114.2081145,
     };
 
-    // const query =
-    // `SUBQUERY(route_stop, $rs,
-    // `route_stop.stopObj.lat > ${startLocation.latitude - walkDistance}
-    // route_stop.stopObj.lat < ${startLocation.latitude + walkDistance} &&
-    // route_stop.stopObj.long > ${startLocation.longitude - walkDistance} &&
-    // route_stop.stopObj.long < ${startLocation.longitude + walkDistance}`;
-    // ).@count > 0`;
+    console.log('makeGraph Data @ ', new Date());
 
-    // console.log('query', query);
+    console.log('get Data @ ', new Date());
 
-    const query = `SUBQUERY(route_stop, $rs, 
-      $rs.stopObj.lat > ${startLocation.latitude - walkDistance} &&
-      $rs.stopObj.lat < ${startLocation.latitude + walkDistance} &&
-      $rs.stopObj.long > ${startLocation.longitude - walkDistance} &&
-      $rs.stopObj.long < ${startLocation.longitude + walkDistance}
-    ).@count > 0 &&
-    SUBQUERY(route_stop, $rs, 
-      $rs.stopObj.lat > ${endLocation.latitude - walkDistance} &&
-      $rs.stopObj.lat < ${endLocation.latitude + walkDistance} &&
-      $rs.stopObj.long > ${endLocation.longitude - walkDistance} &&
-      $rs.stopObj.long < ${endLocation.longitude + walkDistance}
-    ).@count > 0`;
+    const busRouteJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/route/')) as any;
 
-    const routeList = realm.objects<Route>('Route').filtered(query);
+    const busRouteData = (busRouteJsonData.data as Route[]).map(data => {
+      return {...data, id: data.route + data.bound + data.service_type};
+    }) as Route[];
 
-    console.log('routeList.length', routeList.length);
-    console.log('routeList.example', routeList);
+    const busRouteStopJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/route-stop')) as any;
 
-    routeList.forEach(route => {
-      if (route.route_stop) {
-        const startRouteQuery = `
-        stopObj.lat > ${startLocation.latitude - walkDistance} &&
-        stopObj.lat < ${startLocation.latitude + walkDistance} &&
-        stopObj.long > ${startLocation.longitude - walkDistance} &&
-        stopObj.long < ${startLocation.longitude + walkDistance}`;
-        const startRouteStops = route.route_stop.filtered(startRouteQuery);
-        // console.log('startRouteStops.length', startRouteStops.length);
+    const busRouteStopData = (busRouteStopJsonData.data as RouteStop[]).map(data => {
+      return {
+        ...data,
+        id: data.route + data.bound + data.service_type + data.seq,
+      };
+    }) as RouteStop[];
 
-        const endRouteQuery = `
-        stopObj.lat > ${endLocation.latitude - walkDistance} &&
-        stopObj.lat < ${endLocation.latitude + walkDistance} &&
-        stopObj.long > ${endLocation.longitude - walkDistance} &&
-        stopObj.long < ${endLocation.longitude + walkDistance}`;
-        const endRouteStops = route.route_stop.filtered(endRouteQuery);
-        // console.log('endRouteStops.length', endRouteStops.length);
+    const busStopJsonData = (await getJsonData('https://data.etabus.gov.hk/v1/transport/kmb/stop')) as any;
 
-        startRouteStops.forEach(startRouteStop => {
-          endRouteStops.forEach(endRouteStop => {
-            if (startRouteStop.seq < endRouteStop.seq)
-              console.log(
-                `start: ${startRouteStop.stopObj?.[0].name_tc} => ${route.route} => ${endRouteStop.stopObj?.[0].name_tc}`,
-              );
-          });
+    const busStopData = busStopJsonData.data.map((busStop: any) => {
+      return {...busStop, lat: Number(busStop.lat), long: Number(busStop.long)};
+    }) as Stop[];
+
+    console.log('complete get Data @ ', new Date());
+
+    let graph: {[key: string]: {[key: string]: number}} = {};
+
+    busStopData.forEach(stop => {
+      busStopData
+        .filter(
+          anotherstop =>
+            Math.abs(stop.lat - anotherstop.lat) < walkDistance &&
+            Math.abs(stop.long - anotherstop.long) < walkDistance,
+        )
+        .forEach(anotherstop => {
+          if (graph[stop.stop] === undefined) {
+            graph[stop.stop] = {};
+          }
+
+          if (graph[stop.stop][anotherstop.stop] === undefined) {
+            if (graph[anotherstop.stop] === undefined) {
+              graph[anotherstop.stop] = {};
+            }
+            const distance =
+              getDistance({lat: stop.lat, lon: stop.long}, {lat: anotherstop.lat, lon: anotherstop.long}) + 1;
+            const time = distance / 1000 / 4;
+            graph[stop.stop][anotherstop.stop] = time;
+            graph[anotherstop.stop][stop.stop] = time;
+          }
         });
-      }
     });
 
-    console.log('end routing @ ', new Date());
-  };
+    console.log('complete loop Data @ ', new Date());
 
-  const testRoutingTwo = (realm: Realm) => {
-    console.log('start routing two @ ', new Date());
-    const startLocation: LatLng = {
-      latitude: 22.3670368,
-      longitude: 114.1796286,
-    };
-    const endLocation: LatLng = {
-      latitude: 22.391128,
-      longitude: 114.2081145,
-    };
+    const route = new Graph(graph);
 
-    const startStopQuery = `
-    lat > ${startLocation.latitude - walkDistance} &&
-    lat < ${startLocation.latitude + walkDistance} &&
-    long > ${startLocation.longitude - walkDistance} &&
-    long < ${startLocation.longitude + walkDistance} &&
-    route_stop.routeObj.route_stop.stopObj.lat > ${endLocation.latitude - walkDistance} &&
-    route_stop.routeObj.route_stop.stopObj.lat < ${endLocation.latitude + walkDistance} &&
-    route_stop.routeObj.route_stop.stopObj.long > ${endLocation.longitude - walkDistance} &&
-    route_stop.routeObj.route_stop.stopObj.long < ${endLocation.longitude + walkDistance}`;
+    console.log('complete make route Data @ ', new Date());
 
-    const startRouteStopQuery = `
-    routeObj.route_stop.stopObj.lat > ${endLocation.latitude - walkDistance} &&
-    routeObj.route_stop.stopObj.lat < ${endLocation.latitude + walkDistance} &&
-    routeObj.route_stop.stopObj.long > ${endLocation.longitude - walkDistance} &&
-    routeObj.route_stop.stopObj.long < ${endLocation.longitude + walkDistance}`;
+    const path = route.path(busStopData[0].stop, busStopData[200].stop);
 
-    const endRouteStopQuery = `
-    stopObj.lat > ${endLocation.latitude - walkDistance} &&
-    stopObj.lat < ${endLocation.latitude + walkDistance} &&
-    stopObj.long > ${endLocation.longitude - walkDistance} &&
-    stopObj.long < ${endLocation.longitude + walkDistance}`;
+    console.log('complete make path Data @ ', new Date(), path);
 
-    const startStopList = realm.objects<Stop>('Stop').filtered(startStopQuery);
+    console.log('complete makeGraph Data @ ', new Date());
 
-    startStopList.forEach(startStop => {
-      const startRouteStopList = startStop.route_stop?.filtered(startRouteStopQuery);
-      startRouteStopList?.forEach(startRouteStop => {
-        const route = startRouteStop.routeObj?.[0];
-        const endRouteStopList = route?.route_stop?.filtered(endRouteStopQuery);
-        endRouteStopList?.forEach(endRouteStop => {
-          const endStop = endRouteStop.stopObj?.[0];
-          console.log(`start: ${startStop.name_tc} => ${route?.route} => ${endStop?.name_tc}`);
-        });
-      });
-    });
+    console.log('start test real routing Data @ ', new Date());
 
-    console.log('end routing two @ ', new Date());
-  };
+    // const newRoute = new Graph(graph);
 
-  const testRoutingMulti = (realm: Realm) => {
-    console.log('start routing Multi @ ', new Date());
-    const startLocation: LatLng = {
-      latitude: 22.3670368,
-      longitude: 114.1796286,
-    };
-    const endLocation: LatLng = {
-      latitude: 22.391128,
-      longitude: 114.2081145,
-    };
-
-    const wayPath = [
-      'route_stop',
-      'routeObj',
-      'route_stop',
-      'stopObj',
-      'nearby_stop',
-      'route_stop',
-      'routeObj',
-      'route_stop.stopObj',
-    ];
-
-    const startStopQuery = `
-    lat > ${startLocation.latitude - walkDistance} &&
-    lat < ${startLocation.latitude + walkDistance} &&
-    long > ${startLocation.longitude - walkDistance} &&
-    long < ${startLocation.longitude + walkDistance} &&
-    ${wayPath.join('.')}.lat > ${endLocation.latitude - walkDistance} &&
-    ${wayPath.join('.')}.lat < ${endLocation.latitude + walkDistance} &&
-    ${wayPath.join('.')}.long > ${endLocation.longitude - walkDistance} &&
-    ${wayPath.join('.')}.long < ${endLocation.longitude + walkDistance}`;
-
-    console.log('start query startStopList @ ', new Date());
-    const startStopList = realm.objects<Stop>('Stop').filtered(startStopQuery);
-    console.log('end query startStopList @ ', new Date());
-
-    console.log('startStopList.example', startStopList[0].name_tc);
-
-    console.log('end routing Multi @ ', new Date());
+    console.log('end test real routing Data @ ', new Date());
   };
 
   type Route = {

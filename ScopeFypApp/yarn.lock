@@ -1295,6 +1295,11 @@
   "resolved" "https://registry.npmjs.org/@types/json-schema/-/json-schema-7.0.9.tgz"
   "version" "7.0.9"
 
+"@types/node-dijkstra@^2.5.2":
+  "integrity" "sha512-PiHNOWnj+IoTz9nN1tWw8OmEMUk+8W9QVbma11osBMZbkI5xVXrJbgkRk4c5yWfEiOO3kKkLGnV8OBZ41jNKJw=="
+  "resolved" "https://registry.npmjs.org/@types/node-dijkstra/-/node-dijkstra-2.5.2.tgz"
+  "version" "2.5.2"
+
 "@types/node@*":
   "integrity" "sha512-ua7PgUoeQFjmWPcoo9khiPum3Pd60k4/2ZGXt18sm2Slk0W0xZTqt5Y0Ny1NyBiN1EVQ/+FaF9NcY4Qe6rwk5w=="
   "resolved" "https://registry.npmjs.org/@types/node/-/node-16.11.6.tgz"
