@@ -63,6 +63,10 @@ export const testGraph = () => {
   graph.addEdge('i', 'end', 1000);
 
   graph.printGraph();
+
+  console.log('----------------------------', 'A start', '----------------------------');
+
+  graph.A_Star('start', 'end', new Map());
 };
 
 export const A_Star = (graph: Graph, h: number) => {
