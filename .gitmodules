@@ -1,0 +1,4 @@
+[submodule "SCOPE_FYP_APP"]
+	path = SCOPE_FYP_APP
+	url = https://github.com/him1231/SCOPE_FYP_APP.git
+	branch = master
